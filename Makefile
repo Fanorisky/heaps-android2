@@ -8,7 +8,7 @@ ifeq ($(OS),Windows_NT)
 	choco install --no-progress haxe openal ffmpeg android-sdk android-ndk
 else ifeq ($(shell uname -s),Darwin)
 	brew install haxe
-	brew bundle install --file hashlink/Brewfile --no-lock
+	brew bundle install --file hashlink/Brewfile
 	brew cask install android-studio
 	chmod u+x /Applications/Android\ Studio.app/Contents/plugins/android/lib/templates/gradle/wrapper/gradlew
 endif
