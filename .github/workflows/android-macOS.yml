@@ -20,3 +20,4 @@ jobs:
       with:
         name: heapsapp-debug.apk
         path: heaps-android-app/heapsapp/build/outputs/apk/debug/heapsapp-debug.apk
+
