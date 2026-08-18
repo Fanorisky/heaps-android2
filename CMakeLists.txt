@@ -41,6 +41,16 @@ target_include_directories(hl PRIVATE hashlink/include/pcre)
 # PCRE2 hard-errors without a code unit width, and takes its feature set from
 # include/pcre/config.h. Both values match what hashlink builds PCRE2 with.
 target_compile_definitions(hl PRIVATE HAVE_CONFIG_H PCRE2_CODE_UNIT_WIDTH=16)
+
+# Scoped to the files that actually call hl_debug_break: applying it to the whole
+# target would prepend hl.h to sources that set up macros before including it
+# themselves (std/socket.c raises FD_SETSIZE), changing what they compile to.
+set_source_files_properties(
+	${CMAKE_CURRENT_SOURCE_DIR}/hashlink/src/std/error.c
+	PROPERTIES COMPILE_OPTIONS
+	"-include;${CMAKE_CURRENT_SOURCE_DIR}/android_debug_break.h"
+)
+
 target_link_libraries(hl log)
 
 # FMT
