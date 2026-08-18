@@ -43,6 +43,19 @@ Other targets:
 Push a branch or trigger the `android` workflow manually. `make build` on Linux
 intentionally fails with a pointer to CI.
 
+The workflow runs Haxe codegen once, then builds the native libraries two ways in
+parallel: `native` drives cmake directly (readable errors), and `apk` lets Gradle
+drive it and produces the APK, uploaded as the **`heapsapp-debug`** artifact.
+
+NDK, cmake, `compileSdk` and `minSdk` versions are read out of
+`heaps-android-app/heapsapp/build.gradle` by
+[.github/scripts/android-sdk-versions.sh](.github/scripts/android-sdk-versions.sh),
+so both jobs build against the same toolchain. Change them there, not in the
+workflow.
+
+Note that `heaps-android-app/gradle/wrapper/gradle-wrapper.jar` is still the
+Gradle 4.6 one; CI invokes `gradle` directly and never uses it.
+
 ## Version pinning
 
 `heaps` is pinned to **2.1.1** and `hashlink` to **1.15**. hashlink 1.15 is the

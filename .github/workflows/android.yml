@@ -8,21 +8,15 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Stage 1: the Haxe -> C step plus the whole native build, driven by cmake
-  # directly. Gradle is deliberately not involved yet, so a native failure shows
-  # up as a plain cmake/ninja error instead of buried in Gradle output.
-  native:
+  # Stage 1: Haxe -> C. Cheap, and both downstream jobs need out/, so run it once
+  # and share the result rather than repeating it per job.
+  haxe:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
 
       - uses: krdlab/setup-haxe@v1
         with:
@@ -48,34 +42,52 @@ jobs:
             | sed -E 's/^HL_API [^ ]+ +//; s/\($//' | sed -E 's/_.*//' \
             | sort | uniq -c | sort -rn
 
-      # The SDK ships both cmake 3.31.x and 4.1.x. This project (and sdl2 /
-      # openal-soft) declare cmake_minimum_required < 3.5, which 4.x rejects
-      # outright, so resolve a 3.x explicitly rather than taking whatever is
-      # first on PATH.
-      - name: Select CMake 3.x from the Android SDK
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hlc-sources
+          path: out
+          retention-days: 5
+
+  # Stage 2a: the native build driven by cmake directly. Gradle is deliberately
+  # not involved, so a native failure shows up as a plain cmake/ninja error
+  # instead of buried in Gradle output. This duplicates the native compile the
+  # apk job does anyway -- it is here because it is much the more readable of the
+  # two, and can be dropped once this build has been green for a while.
+  native:
+    needs: haxe
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: hlc-sources
+          path: out
+
+      - name: Resolve NDK and CMake versions
+        run: .github/scripts/android-sdk-versions.sh
+
+      - name: Install NDK and CMake
         run: |
-          CMAKE_DIR="$(ls -d "$ANDROID_HOME"/cmake/3.* 2>/dev/null | sort -V | tail -1 || true)"
-          if [ -z "$CMAKE_DIR" ]; then
-            echo "No cmake 3.x in $ANDROID_HOME/cmake, installing..."
-            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install 'cmake;3.31.5'
-            CMAKE_DIR="$(ls -d "$ANDROID_HOME"/cmake/3.* | sort -V | tail -1)"
-          fi
-          echo "Using $CMAKE_DIR"
-          "$CMAKE_DIR/bin/cmake" --version
-          echo "CMAKE_DIR=$CMAKE_DIR" >> "$GITHUB_ENV"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION"
 
       - name: Configure native build
         run: |
-          $CMAKE_DIR/bin/cmake \
+          "$CMAKE_BIN" \
             -S . -B build \
             -G Ninja \
-            -DCMAKE_MAKE_PROGRAM="$CMAKE_DIR/bin/ninja" \
-            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
+            -DCMAKE_MAKE_PROGRAM="$NINJA_BIN" \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_HOME/ndk/$NDK_VERSION/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-21
+            -DANDROID_PLATFORM="android-$MIN_SDK"
 
       - name: Build native libraries
-        run: $CMAKE_DIR/bin/cmake --build build
+        run: |
+          "$CMAKE_BIN" --build build
 
       - name: Show built libraries
         if: always()
@@ -89,4 +101,63 @@ jobs:
           path: |
             build/CMakeFiles/*.log
             build/CMakeCache.txt
+          if-no-files-found: ignore
+
+  # Stage 2b: the APK. This is the artifact the project exists to produce; there
+  # is deliberately no local gradle path (see the Linux branch of the Makefile).
+  apk:
+    needs: haxe
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: hlc-sources
+          path: out
+
+      # AGP 8.7 requires JDK 17+.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Resolve NDK and CMake versions
+        run: .github/scripts/android-sdk-versions.sh
+
+      # AGP would auto-download these, but doing it up front means a bad version
+      # fails here with a clear message instead of mid-build.
+      - name: Install NDK, CMake and platform
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION" \
+            "platforms;android-$COMPILE_SDK"
+
+      # Runs gradle directly rather than ./gradlew: the checked-in wrapper jar is
+      # from Gradle 4.6 and no supported path in this repo uses it.
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build debug APK
+        run: gradle assembleDebug -p heaps-android-app --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: heapsapp-debug
+          path: heaps-android-app/heapsapp/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload native build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-native-logs
+          path: |
+            heaps-android-app/heapsapp/.cxx/**/*.log
+            heaps-android-app/heapsapp/build/reports
           if-no-files-found: ignore

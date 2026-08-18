@@ -1,17 +1,28 @@
 apply plugin: 'com.android.application'
 
 android {
-    compileSdkVersion 28
+    // Was the `package` attribute in AndroidManifest.xml, which AGP 8 rejects.
+    namespace 'org.libsdl.app'
+    compileSdk 35
+    // Pinned rather than taking ANDROID_NDK_LATEST_HOME, so local and CI builds
+    // agree. This is the ubuntu-latest runner default.
+    ndkVersion '27.3.13750724'
     defaultConfig {
         applicationId "io.heaps.android"
-        minSdkVersion 19
-        targetSdkVersion 28
+        // NDK r26 dropped API 19/20; 21 is the floor.
+        minSdk 21
+        targetSdk 35
         versionCode 1
         versionName "1.0"
         externalNativeBuild {
             cmake {
                 cppFlags "-frtti -fexceptions"
             }
+        }
+        ndk {
+            // One ABI keeps CI within its timeout: each extra ABI rebuilds SDL,
+            // OpenAL and libjpeg-turbo from scratch.
+            abiFilters 'arm64-v8a'
         }
     }
     buildTypes {
@@ -23,11 +34,13 @@ android {
     externalNativeBuild {
         cmake {
             path '../../CMakeLists.txt'
+            // This project, sdl2 and openal-soft all declare
+            // cmake_minimum_required < 3.5, which CMake 4.x rejects outright.
+            version '3.31.5'
         }
     }
 }
 
 dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar'])
-    implementation 'com.android.support:appcompat-v7:28.0.0'
 }
