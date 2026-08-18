@@ -1,0 +1,92 @@
+name: android
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - fix-ci-linux
+  workflow_dispatch:
+
+jobs:
+  # Stage 1: the Haxe -> C step plus the whole native build, driven by cmake
+  # directly. Gradle is deliberately not involved yet, so a native failure shows
+  # up as a plain cmake/ninja error instead of buried in Gradle output.
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: krdlab/setup-haxe@v1
+        with:
+          haxe-version: 4.3.7
+
+      - name: Cache haxelib
+        uses: actions/cache@v4
+        with:
+          path: .haxelib
+          key: haxelib-${{ hashFiles('Makefile', 'config/*.hxml') }}
+
+      - name: Install Haxe libraries
+        run: make init
+
+      - name: Generate C sources
+        run: make demo-c
+
+      - name: Check generated sources
+        run: |
+          test -f out/main.c || { echo "out/main.c was not generated"; exit 1; }
+          echo "Primitive prefixes referenced by the generated code:"
+          grep -oE '^HL_API [a-zA-Z_0-9*]+ +[a-z_0-9]+\(' out/hl/natives.h \
+            | sed -E 's/^HL_API [^ ]+ +//; s/\($//' | sed -E 's/_.*//' \
+            | sort | uniq -c | sort -rn
+
+      # The SDK ships both cmake 3.31.x and 4.1.x. This project (and sdl2 /
+      # openal-soft) declare cmake_minimum_required < 3.5, which 4.x rejects
+      # outright, so resolve a 3.x explicitly rather than taking whatever is
+      # first on PATH.
+      - name: Select CMake 3.x from the Android SDK
+        run: |
+          CMAKE_DIR="$(ls -d "$ANDROID_HOME"/cmake/3.* 2>/dev/null | sort -V | tail -1 || true)"
+          if [ -z "$CMAKE_DIR" ]; then
+            echo "No cmake 3.x in $ANDROID_HOME/cmake, installing..."
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install 'cmake;3.31.5'
+            CMAKE_DIR="$(ls -d "$ANDROID_HOME"/cmake/3.* | sort -V | tail -1)"
+          fi
+          echo "Using $CMAKE_DIR"
+          "$CMAKE_DIR/bin/cmake" --version
+          echo "CMAKE_DIR=$CMAKE_DIR" >> "$GITHUB_ENV"
+
+      - name: Configure native build
+        run: |
+          $CMAKE_DIR/bin/cmake \
+            -S . -B build \
+            -G Ninja \
+            -DCMAKE_MAKE_PROGRAM="$CMAKE_DIR/bin/ninja" \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-21
+
+      - name: Build native libraries
+        run: $CMAKE_DIR/bin/cmake --build build
+
+      - name: Show built libraries
+        if: always()
+        run: find build -name '*.so' -o -name '*.a' | sort
+
+      - name: Upload native build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-build-logs
+          path: |
+            build/CMakeFiles/*.log
+            build/CMakeCache.txt
+          if-no-files-found: ignore

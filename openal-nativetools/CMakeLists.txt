@@ -41,11 +41,13 @@ OPTION(ALSOFT_DLOPEN  "Check for the dlopen API for loading optional libs"  ON)
 
 OPTION(ALSOFT_WERROR  "Treat compile warnings as errors"      OFF)
 
-OPTION(ALSOFT_UTILS          "Build and install utility programs"         ON)
-OPTION(ALSOFT_NO_CONFIG_UTIL "Disable building the alsoft-config utility" OFF)
+# Utils/examples/tests default to OFF here: they build host-oriented executables
+# (and alsoft-config probes Qt5), none of which cross-compile for Android.
+OPTION(ALSOFT_UTILS          "Build and install utility programs"         OFF)
+OPTION(ALSOFT_NO_CONFIG_UTIL "Disable building the alsoft-config utility" ON)
 
-OPTION(ALSOFT_EXAMPLES  "Build and install example programs"  ON)
-OPTION(ALSOFT_TESTS     "Build and install test programs"     ON)
+OPTION(ALSOFT_EXAMPLES  "Build and install example programs"  OFF)
+OPTION(ALSOFT_TESTS     "Build and install test programs"     OFF)
 
 OPTION(ALSOFT_CONFIG "Install alsoft.conf sample configuration file" ON)
 OPTION(ALSOFT_HRTF_DEFS "Install HRTF definition files" ON)
@@ -1288,10 +1290,15 @@ FILE(MAKE_DIRECTORY "${NATIVE_BIN_DIR}")
 SET(BIN2H_COMMAND  "${NATIVE_BIN_DIR}bin2h")
 SET(BSINCGEN_COMMAND  "${NATIVE_BIN_DIR}bsincgen")
 
-#[[
-
+# Build bin2h/bsincgen for the *host* (not the Android target): a fresh CMake
+# invocation with no toolchain file falls back to the host compiler. The generator
+# and its make program are forwarded from the outer build so this works when the
+# outer build is driven by the Android SDK's ninja, which is not on PATH.
 ADD_CUSTOM_COMMAND(OUTPUT "${BIN2H_COMMAND}" "${BSINCGEN_COMMAND}"
-    COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" "${NATIVE_SRC_DIR}"
+    COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}"
+            -DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
+            -DCMAKE_BUILD_TYPE=Release
+            "${NATIVE_SRC_DIR}"
     COMMAND ${CMAKE_COMMAND} -E remove "${BIN2H_COMMAND}" "${BSINCGEN_COMMAND}"
     COMMAND ${CMAKE_COMMAND} --build . --config "Release"
     WORKING_DIRECTORY "${NATIVE_BIN_DIR}"
@@ -1304,11 +1311,6 @@ ADD_CUSTOM_TARGET(native-tools
     DEPENDS "${BIN2H_COMMAND}" "${BSINCGEN_COMMAND}"
     VERBATIM
 )
-
-]]
-
-file(COPY ${OpenAL_SOURCE_DIR}/../openal-nativetools/bin2h DESTINATION ${NATIVE_BIN_DIR})
-file(COPY ${OpenAL_SOURCE_DIR}/../openal-nativetools/bsincgen DESTINATION ${NATIVE_BIN_DIR})
 
 option(ALSOFT_EMBED_HRTF_DATA "Embed the HRTF data files (increases library footprint)" ON)
 if(ALSOFT_EMBED_HRTF_DATA)

@@ -1,8 +1,14 @@
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.10)
 
 project(heapsapp)
 
 include_directories(hashlink/src)
+
+# Gradle passes ANDROID_NDK, but a standalone cmake invocation using the NDK
+# toolchain file only sets CMAKE_ANDROID_NDK. Needed by the ndk-build call below.
+if(NOT ANDROID_NDK)
+	set(ANDROID_NDK ${CMAKE_ANDROID_NDK})
+endif()
 
 # LibHL
 
@@ -19,6 +25,7 @@ add_library(hl STATIC
 	${pcre}
 	${libhl}
     hashlink/src/std/sys_android.c
+	uv_stub.c
 )
 
 target_include_directories(hl PRIVATE hashlink/include/pcre)
@@ -65,6 +72,11 @@ target_include_directories(fmt.hdll PRIVATE
 
 # SDL
 
+# SDL_STATIC defaults ON, which would compile every SDL source a second time for
+# an archive nothing links. SDL_TEST/VIDEO_VULKAN are likewise dead weight here.
+set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+set(SDL_TEST OFF CACHE BOOL "" FORCE)
+set(VIDEO_VULKAN OFF CACHE BOOL "" FORCE)
 add_subdirectory(sdl2)
 file(GLOB sdl hashlink/libs/sdl/*.c)
 add_library(sdl.hdll STATIC ${sdl})
@@ -73,6 +85,12 @@ target_link_libraries(sdl.hdll SDL2 SDL2main EGL GLESv3)
 
 # OpenAL
 
+# Belt-and-braces: openal-nativetools/CMakeLists.txt already defaults these OFF,
+# but force them so a stale CMake cache can't re-enable host-only executables.
+set(ALSOFT_UTILS OFF CACHE BOOL "" FORCE)
+set(ALSOFT_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(ALSOFT_TESTS OFF CACHE BOOL "" FORCE)
+set(ALSOFT_NO_CONFIG_UTIL ON CACHE BOOL "" FORCE)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/openal-nativetools/CMakeLists.txt ${CMAKE_CURRENT_SOURCE_DIR}/openal-soft COPYONLY)
 add_subdirectory(openal-soft)
 file(GLOB openal hashlink/libs/openal/*.c)

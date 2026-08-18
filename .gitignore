@@ -1,1 +1,11 @@
 /out/*
+!/out/README.md
+/.haxelib/
+/build/
+.gradle/
+heaps-android-app/local.properties
+heaps-android-app/**/build/
+heaps-android-app/**/.cxx/
+# ndk-build writes these into the libjpeg-turbo submodule
+/libjpeg-turbo/obj/
+/libjpeg-turbo/libs/
