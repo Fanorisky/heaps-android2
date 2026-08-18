@@ -14,12 +14,21 @@ endif()
 
 file(GLOB libhl
     hashlink/src/std/*.c
-	hashlink/src/alloc.c
 	hashlink/src/gc.c
 )
+# Needs the debugger's ptrace/process plumbing, which Android does not provide.
+# (src/allocator.c is deliberately absent: gc.c #includes it.)
 list(REMOVE_ITEM libhl ${CMAKE_CURRENT_SOURCE_DIR}/hashlink/src/std/debug.c)
 
-file(GLOB pcre hashlink/include/pcre/pcre*.c)
+# hashlink 1.15 vendors PCRE2, where 1.11 vendored PCRE1 -- hence the pcre2_
+# prefix and the exclusions below. These three are #included by their siblings
+# rather than compiled on their own, so building them as separate translation
+# units either fails outright or duplicates symbols. Mirrors the PCRE list in
+# hashlink's own Makefile and CMakeLists.
+file(GLOB pcre hashlink/include/pcre/pcre2_*.c)
+foreach(f pcre2_jit_match.c pcre2_jit_misc.c pcre2_ucptables.c)
+	list(REMOVE_ITEM pcre ${CMAKE_CURRENT_SOURCE_DIR}/hashlink/include/pcre/${f})
+endforeach()
 
 add_library(hl STATIC
 	${pcre}
@@ -29,6 +38,9 @@ add_library(hl STATIC
 )
 
 target_include_directories(hl PRIVATE hashlink/include/pcre)
+# PCRE2 hard-errors without a code unit width, and takes its feature set from
+# include/pcre/config.h. Both values match what hashlink builds PCRE2 with.
+target_compile_definitions(hl PRIVATE HAVE_CONFIG_H PCRE2_CODE_UNIT_WIDTH=16)
 target_link_libraries(hl log)
 
 # FMT
